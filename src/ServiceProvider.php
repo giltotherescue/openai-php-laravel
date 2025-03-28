@@ -26,19 +26,23 @@ final class ServiceProvider extends BaseServiceProvider implements DeferrablePro
             $apiKey = config('openai.api_key');
             $organization = config('openai.organization');
             $baseUri = config('openai.base_uri');
-            
+            $timeout = config('openai.request_timeout', 30);
+
             if (! is_string($apiKey) || ($organization !== null && ! is_string($organization))) {
                 throw ApiKeyIsMissing::create();
             }
 
-            $client = OpenAI::factory()
-                ->withApiKey($apiKey)
-                ->withOrganization($organization)
-                ->withHttpHeader('OpenAI-Beta', 'assistants=v1')
-                ->withHttpClient(new \GuzzleHttp\Client(['timeout' => config('openai.request_timeout', 30)]));
+            $factory = new \OpenAI\Factory();
+            $client = $factory->withApiKey($apiKey)
+                // ->withHttpHeader('OpenAI-Beta', 'assistants=v1')
+                ->withHttpClient(new \GuzzleHttp\Client(['timeout' => $timeout]));
+
+            if ($organization !== null) {
+                $client = $client->withOrganization($organization);
+            }
 
             if (is_string($baseUri)) {
-                $client->withBaseUri($baseUri);
+                $client = $client->withBaseUri($baseUri);
             }
 
             return $client->make();
@@ -76,5 +80,30 @@ final class ServiceProvider extends BaseServiceProvider implements DeferrablePro
             ClientContract::class,
             'openai',
         ];
+    }
+
+    public function rebindClient(string $newApiKey, string $newBaseUri): void
+    {
+        $this->app->singleton(ClientContract::class, function () use ($newApiKey, $newBaseUri) {
+            $organization = config('openai.organization');
+            $timeout = config('openai.request_timeout', 30);
+
+            $factory = new \OpenAI\Factory();
+            $client = $factory->withApiKey($newApiKey)
+                // ->withHttpHeader('OpenAI-Beta', 'assistants=v1')
+                ->withHttpClient(new \GuzzleHttp\Client(['timeout' => $timeout]));
+
+            $client = $client->withBaseUri($newBaseUri);
+            
+            if ($organization !== null) {
+                $client = $client->withOrganization($organization);
+            }
+
+            return $client->make();
+        });
+
+        // Re-alias to ensure the rebinding is effective
+        $this->app->alias(ClientContract::class, 'openai');
+        $this->app->alias(ClientContract::class, Client::class);
     }
 }
